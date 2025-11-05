@@ -1,0 +1,27 @@
+{
+  "filters": {
+    "min_trade_size": 50000,
+    "max_days_old": 30
+  },
+  "signals": {
+    "cluster_threshold": 2
+  },
+  "committee_alignments": {
+    "Armed Services": ["LMT", "RTX", "BA", "NOC", "GD"],
+    "Financial Services": ["JPM", "BAC", "C", "GS", "MS", "WFC"],
+    "Energy & Commerce": ["XOM", "CVX", "COP", "SLB", "HAL"],
+    "Science & Technology": ["AAPL", "GOOGL", "MSFT", "NVDA", "AMD", "TSM"],
+    "Transportation": ["DAL", "UAL", "AAL", "LUV", "UPS", "FDX"],
+    "Agriculture": ["DE", "ADM", "BG", "TSN"],
+    "Healthcare": ["UNH", "CVS", "CI", "HCA", "ANTM"]
+  },
+  "top_performers": [
+    "Nancy Pelosi",
+    "Paul Pelosi",
+    "Dan Crenshaw",
+    "Josh Gottheimer",
+    "Austin Scott",
+    "Marjorie Taylor Greene",
+    "Tommy Tuberville"
+  ]
+}
