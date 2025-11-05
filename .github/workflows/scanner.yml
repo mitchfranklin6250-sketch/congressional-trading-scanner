@@ -1,15 +1,15 @@
-name: Congressional Trading Scanner
+name: Congressional Trading Scanner + Strategies
 
 on:
   schedule:
-    - cron: '0 14 * * *'
-    - cron: '0 22 * * *'
+    - cron: '0 14 * * *'  # 9am EST
+    - cron: '0 22 * * *'  # 5pm EST
   workflow_dispatch:
   push:
     branches: [ main ]
 
 jobs:
-  scan-and-alert:
+  scan-and-strategies:
     runs-on: ubuntu-latest
     
     steps:
@@ -24,6 +24,7 @@ jobs:
     - name: Install dependencies
       run: pip install -r requirements.txt
     
+    # ORIGINAL SCANNER - Detect new trades
     - name: Run congressional scanner
       env:
         USE_SAMPLE_DATA: 'false'
@@ -33,25 +34,138 @@ jobs:
       continue-on-error: true
       run: python performance_tracker.py
     
-    - name: Send Discord alerts
+    # NEW STRATEGIES - Build portfolios
+    - name: Run premium strategies
+      continue-on-error: true
+      run: python run_all_strategies.py
+    
+    # ENHANCED DISCORD ALERTS - With portfolio context
+    - name: Send enhanced alerts
       if: always()
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       run: python discord_alerts.py
     
+    - name: Send strategy alerts
+      if: always()
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: python strategy_discord_alerts.py
+    
+    # SAVE ALL RESULTS
     - name: Commit and push results
       if: always()
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add signals.json signal_history.json || true
-        git diff --quiet && git diff --staged --quiet || git commit -m "Update signals"
+        git add signals.json signal_history.json *_portfolio.json || true
+        git diff --quiet && git diff --staged --quiet || git commit -m "Update signals and portfolios - $(date)"
         git push || true
     
+    # UPLOAD ARTIFACTS (v4!)
     - name: Upload artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: trading-signals
-        path: signals.json
+        name: trading-data
+        path: |
+          signals.json
+          signal_history.json
+          congress_buys_portfolio.json
+          dan_meuser_portfolio.json
+          blended_portfolio.json
         retention-days: 90
+```
+
+5. Commit message: `Update workflow for strategies and enhanced alerts`
+6. Click **"Commit changes"**
+
+---
+
+## 🎯 STEP 4: Verify Everything is Uploaded
+
+### Check Your Repo Has These Files:
+
+**Original files (should already exist):**
+- ✅ congressional_scanner.py
+- ✅ performance_tracker.py
+- ✅ run_pipeline.py
+- ✅ config.json
+- ✅ requirements.txt
+- ✅ .gitignore
+- ✅ .env.example
+
+**NEW files (you just added):**
+- ✅ congress_buys_strategy.py
+- ✅ dan_meuser_strategy.py
+- ✅ strategy_analyzer.py
+- ✅ strategy_discord_alerts.py
+- ✅ run_all_strategies.py
+
+**Updated files:**
+- ✅ discord_alerts.py (now enhanced)
+- ✅ .github/workflows/scanner.yml (now includes strategies)
+
+**Total: Should have 17 files**
+
+---
+
+## 🎯 STEP 5: Test the Workflow
+
+1. Go to **"Actions"** tab
+2. Click **"Congressional Trading Scanner + Strategies"**
+3. Click **"Run workflow"** button (right side)
+4. Keep "Branch: main" selected
+5. Click green **"Run workflow"** button
+
+### Watch It Run:
+
+You should see these steps execute:
+1. ✅ Checkout code
+2. ✅ Set up Python
+3. ✅ Install dependencies
+4. ✅ Run congressional scanner
+5. ✅ Update performance tracking
+6. ✅ Run premium strategies ← NEW!
+7. ✅ Send enhanced alerts ← ENHANCED!
+8. ✅ Send strategy alerts ← NEW!
+9. ✅ Commit and push results
+10. ✅ Upload artifacts
+
+**Takes ~2-3 minutes**
+
+---
+
+## 🎯 STEP 6: Check Discord Alerts
+
+### You Should Receive (in your Discord):
+
+**From Scanner (Enhanced):**
+```
+🚨 Congressional Trading Alert
+Found X high-priority signals
+
+⭐ TOP PERFORMER: Nancy Pelosi purchase NVDA
+Ticker: NVDA
+Amount: $250,000
+
+📊 Nancy Pelosi's Current Portfolio:
+🔥 1. NVDA - 35% ($1,750,000)
+   2. TSLA - 30% ($1,500,000)
+   3. GOOGL - 20% ($1,000,000)
+   ...
+
+Portfolio Stats: 23 positions | $5,000,000
+```
+
+**From Strategies:**
+```
+📊 Congress Buys Strategy Update
+💼 Portfolio: 47 positions
+💰 Total: $8,450,000
+
+🏆 Dan Meuser Portfolio Update
+📈 All-Time Return: +735.85%
+💼 Current: 23 positions
+
+🎯 Blended Portfolio Strategy
