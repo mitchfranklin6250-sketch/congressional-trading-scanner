@@ -2,15 +2,11 @@ name: Congressional Trading Scanner
 
 on:
   schedule:
-    # Run twice daily: 9am and 5pm EST
-    - cron: '0 14 * * *'  # 9am EST (2pm UTC)
-    - cron: '0 22 * * *'  # 5pm EST (10pm UTC)
-  workflow_dispatch:  # Allow manual triggering
+    - cron: '0 14 * * *'
+    - cron: '0 22 * * *'
+  workflow_dispatch:
   push:
     branches: [ main ]
-    paths:
-      - '**.py'
-      - 'config.json'
 
 jobs:
   scan-and-alert:
@@ -26,26 +22,22 @@ jobs:
         python-version: '3.10'
     
     - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
+      run: pip install -r requirements.txt
     
     - name: Run congressional scanner
-      run: |
-        python congressional_scanner.py
       env:
         USE_SAMPLE_DATA: 'false'
+      run: python congressional_scanner.py
     
     - name: Update performance tracking
-      run: |
-        python performance_tracker.py
       continue-on-error: true
+      run: python performance_tracker.py
     
     - name: Send Discord alerts
       if: always()
-      run: |
-        python discord_alerts.py
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: python discord_alerts.py
     
     - name: Commit and push results
       if: always()
@@ -53,7 +45,7 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add signals.json signal_history.json || true
-        git diff --quiet && git diff --staged --quiet || git commit -m "Update trading signals - $(date)"
+        git diff --quiet && git diff --staged --quiet || git commit -m "Update signals"
         git push || true
     
     - name: Upload artifacts
@@ -61,43 +53,5 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: trading-signals
-        path: |
-          signals.json
-          signal_history.json
+        path: signals.json
         retention-days: 90
-```
-
-4. **Scroll down, commit message:** `Add GitHub Actions workflow`
-
-5. **Click "Commit new file"**
-
----
-
-## Optional: Documentation Files (Nice to Have)
-
-These are **optional** but helpful for reference:
-- SETUP_GUIDE.md
-- PROJECT_SUMMARY.md
-- DEPLOYMENT_CHECKLIST.md
-- FILE_MANIFEST.md
-
-You can upload these later if you want, but they're just documentation.
-
----
-
-## ✅ After Creating scanner.yml
-
-Your repo should show:
-```
-.env.example ✅
-.gitignore ✅
-.github/
-  workflows/
-    scanner.yml ✅  ← NEW!
-README.md ✅
-config.json ✅
-congressional_scanner.py ✅
-discord_alerts.py ✅
-performance_tracker.py ✅
-requirements.txt ✅
-run_pipeline.py ✅
