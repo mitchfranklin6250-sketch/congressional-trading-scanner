@@ -1,40 +1,223 @@
 """
-Discord Alert System for Congressional Trading Scanner
-Sends beautiful formatted alerts to Discord
+Enhanced Discord Alerts with Portfolio Context
+Shows politician's current holdings when alerting on their trades
 """
 
 import json
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections import defaultdict
+import re
 
-class DiscordAlerter:
-    """Send trading signals to Discord"""
+class EnhancedDiscordAlerter:
+    """Send trading signals with portfolio context to Discord"""
     
     def __init__(self, webhook_url: str = None):
         self.webhook_url = webhook_url or os.getenv('DISCORD_WEBHOOK_URL')
-        
-        if not self.webhook_url:
-            print("⚠️  No Discord webhook URL configured")
-            self.enabled = False
-        else:
-            self.enabled = True
+        self.enabled = bool(self.webhook_url)
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
     
-    def create_signal_embed(self, signal: dict) -> dict:
-        """Create a rich embed for a signal"""
+    def parse_amount(self, amount_str: str) -> int:
+        """Convert amount string to integer"""
+        if not amount_str:
+            return 0
         
-        # Color coding by signal type
+        amount_str = amount_str.replace('$', '').replace(',', '').strip()
+        
+        if '-' in amount_str:
+            parts = amount_str.split('-')
+            try:
+                low = float(parts[0].strip())
+                high = float(parts[1].strip())
+                return int((low + high) / 2)
+            except:
+                pass
+        
+        if 'K' in amount_str.upper():
+            try:
+                return int(float(amount_str.upper().replace('K', '').strip()) * 1000)
+            except:
+                pass
+        
+        if 'M' in amount_str.upper():
+            try:
+                return int(float(amount_str.upper().replace('M', '').strip()) * 1000000)
+            except:
+                pass
+        
+        try:
+            return int(float(amount_str))
+        except:
+            return 0
+    
+    def fetch_politician_portfolio(self, politician_name: str) -> dict:
+        """Fetch a politician's current portfolio from recent trades"""
+        print(f"  📊 Fetching {politician_name}'s portfolio...")
+        
+        all_trades = []
+        lookback_date = datetime.now() - timedelta(days=365)
+        
+        # Try House Stock Watcher
+        try:
+            response = requests.get(
+                "https://housestockwatcher.com/api/all_transactions",
+                headers=self.headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                for trade in data:
+                    try:
+                        representative = trade.get('representative', '')
+                        if politician_name.lower() not in representative.lower():
+                            continue
+                        
+                        trade_date = datetime.strptime(trade['transaction_date'], '%Y-%m-%d')
+                        if trade_date < lookback_date:
+                            continue
+                        
+                        ticker = trade.get('ticker', '')
+                        if not ticker:
+                            asset_desc = trade.get('asset_description', '')
+                            ticker_match = re.search(r'\(([A-Z]{1,5})\)', asset_desc)
+                            if ticker_match:
+                                ticker = ticker_match.group(1)
+                        
+                        if not ticker:
+                            continue
+                        
+                        amount = self.parse_amount(trade.get('amount', ''))
+                        trans_type = trade.get('type', '').lower()
+                        
+                        if 'purchase' in trans_type or 'buy' in trans_type:
+                            trans_type = 'BUY'
+                        elif 'sale' in trans_type or 'sell' in trans_type:
+                            trans_type = 'SELL'
+                        else:
+                            continue
+                        
+                        all_trades.append({
+                            'ticker': ticker,
+                            'date': trade['transaction_date'],
+                            'type': trans_type,
+                            'amount': amount
+                        })
+                    except:
+                        continue
+        except:
+            pass
+        
+        # Try Senate Stock Watcher
+        try:
+            response = requests.get(
+                "https://senatestockwatcher.com/api/all_transactions",
+                headers=self.headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                for trade in data:
+                    try:
+                        senator = trade.get('senator', '')
+                        if politician_name.lower() not in senator.lower():
+                            continue
+                        
+                        trade_date = datetime.strptime(trade['transaction_date'], '%Y-%m-%d')
+                        if trade_date < lookback_date:
+                            continue
+                        
+                        ticker = trade.get('ticker', '')
+                        if not ticker:
+                            asset_desc = trade.get('asset_description', '')
+                            ticker_match = re.search(r'\(([A-Z]{1,5})\)', asset_desc)
+                            if ticker_match:
+                                ticker = ticker_match.group(1)
+                        
+                        if not ticker:
+                            continue
+                        
+                        amount = self.parse_amount(trade.get('amount', ''))
+                        trans_type = trade.get('type', '').lower()
+                        
+                        if 'purchase' in trans_type or 'buy' in trans_type:
+                            trans_type = 'BUY'
+                        elif 'sale' in trans_type or 'sell' in trans_type:
+                            trans_type = 'SELL'
+                        else:
+                            continue
+                        
+                        all_trades.append({
+                            'ticker': ticker,
+                            'date': trade['transaction_date'],
+                            'type': trans_type,
+                            'amount': amount
+                        })
+                    except:
+                        continue
+        except:
+            pass
+        
+        # Calculate current portfolio
+        positions = defaultdict(lambda: {'buys': 0, 'sells': 0, 'net': 0})
+        
+        for trade in all_trades:
+            ticker = trade['ticker']
+            amount = trade['amount']
+            
+            if trade['type'] == 'BUY':
+                positions[ticker]['buys'] += amount
+                positions[ticker]['net'] += amount
+            else:
+                positions[ticker]['sells'] += amount
+                positions[ticker]['net'] -= amount
+        
+        # Build portfolio (only positive positions)
+        portfolio = []
+        total_value = 0
+        
+        for ticker, data in positions.items():
+            if data['net'] > 0:
+                portfolio.append({
+                    'ticker': ticker,
+                    'value': data['net']
+                })
+                total_value += data['net']
+        
+        # Calculate weights
+        for pos in portfolio:
+            pos['weight'] = round((pos['value'] / total_value) * 100, 1) if total_value > 0 else 0
+        
+        # Sort by weight
+        portfolio.sort(key=lambda x: x['weight'], reverse=True)
+        
+        return {
+            'portfolio': portfolio[:10],  # Top 10
+            'total_value': total_value,
+            'num_positions': len(portfolio)
+        }
+    
+    def create_enhanced_signal_embed(self, signal: dict) -> dict:
+        """Create enhanced embed with portfolio context"""
+        
+        # Standard colors by signal type
         colors = {
-            'CLUSTER': 0xFF6B6B,      # Red
-            'OPTIONS_TRADE': 0x9B59B6,  # Purple
-            'TOP_PERFORMER': 0x3498DB,  # Blue
-            'LARGE_TRADE': 0xF39C12,    # Orange
-            'COMMITTEE_ALIGNED': 0x2ECC71  # Green
+            'CLUSTER': 0xFF6B6B,
+            'OPTIONS_TRADE': 0x9B59B6,
+            'TOP_PERFORMER': 0x3498DB,
+            'LARGE_TRADE': 0xF39C12,
+            'COMMITTEE_ALIGNED': 0x2ECC71
         }
         
         color = colors.get(signal['signal_type'], 0x95A5A6)
         
-        # Create embed based on signal type
+        # Build base embed (same as before)
         if signal['signal_type'] == 'CLUSTER':
             title = f"🚨 Cluster Signal: {signal['count']} politicians bought {signal['ticker']}"
             description = f"**Multiple congressional purchases detected**"
@@ -65,6 +248,55 @@ class DiscordAlerter:
             if len(signal['politicians']) > 5:
                 fields[-1]['value'] += f"\n... and {len(signal['politicians']) - 5} more"
         
+        elif signal['signal_type'] == 'TOP_PERFORMER':
+            title = f"⭐ Top Performer Trade: {signal['politician']}"
+            description = f"**{signal['transaction_type'].title()} of {signal['ticker']}**"
+            
+            fields = [
+                {
+                    "name": "Ticker",
+                    "value": f"`{signal['ticker']}`",
+                    "inline": True
+                },
+                {
+                    "name": "Amount",
+                    "value": f"${signal['amount']:,}",
+                    "inline": True
+                },
+                {
+                    "name": "Date",
+                    "value": signal['date'],
+                    "inline": True
+                }
+            ]
+            
+            # ADD PORTFOLIO CONTEXT
+            try:
+                portfolio = self.fetch_politician_portfolio(signal['politician'])
+                
+                if portfolio['portfolio']:
+                    portfolio_text = []
+                    for i, pos in enumerate(portfolio['portfolio'][:5], 1):
+                        # Highlight if this is the ticker they just traded
+                        emoji = "🔥 " if pos['ticker'] == signal['ticker'] else ""
+                        portfolio_text.append(
+                            f"{emoji}{i}. **{pos['ticker']}** - {pos['weight']}% (${pos['value']:,.0f})"
+                        )
+                    
+                    fields.append({
+                        "name": f"📊 {signal['politician']}'s Current Portfolio",
+                        "value": "\n".join(portfolio_text),
+                        "inline": False
+                    })
+                    
+                    fields.append({
+                        "name": "Portfolio Stats",
+                        "value": f"Total Positions: {portfolio['num_positions']} | Est. Value: ${portfolio['total_value']:,.0f}",
+                        "inline": False
+                    })
+            except Exception as e:
+                print(f"    ⚠️  Could not fetch portfolio: {e}")
+        
         elif signal['signal_type'] == 'LARGE_TRADE':
             title = f"💰 Large Trade: {signal['politician']}"
             description = f"**{signal['transaction_type'].title()} of {signal['ticker']}**"
@@ -86,50 +318,26 @@ class DiscordAlerter:
                     "inline": True
                 }
             ]
-        
-        elif signal['signal_type'] == 'TOP_PERFORMER':
-            title = f"⭐ Top Performer Trade: {signal['politician']}"
-            description = f"**{signal['transaction_type'].title()} of {signal['ticker']}**"
             
-            fields = [
-                {
-                    "name": "Ticker",
-                    "value": f"`{signal['ticker']}`",
-                    "inline": True
-                },
-                {
-                    "name": "Amount",
-                    "value": f"${signal['amount']:,}",
-                    "inline": True
-                },
-                {
-                    "name": "Tracker",
-                    "value": signal.get('performer_name', signal['politician']),
-                    "inline": True
-                }
-            ]
-        
-        elif signal['signal_type'] == 'OPTIONS_TRADE':
-            title = f"📊 Options Trade: {signal['politician']}"
-            description = f"**Options activity on {signal['ticker']}**"
-            
-            fields = [
-                {
-                    "name": "Ticker",
-                    "value": f"`{signal['ticker']}`",
-                    "inline": True
-                },
-                {
-                    "name": "Amount",
-                    "value": f"${signal['amount']:,}",
-                    "inline": True
-                },
-                {
-                    "name": "Reason",
-                    "value": signal['reason'],
-                    "inline": False
-                }
-            ]
+            # ADD PORTFOLIO CONTEXT for large trades too
+            try:
+                portfolio = self.fetch_politician_portfolio(signal['politician'])
+                
+                if portfolio['portfolio']:
+                    portfolio_text = []
+                    for i, pos in enumerate(portfolio['portfolio'][:5], 1):
+                        emoji = "🔥 " if pos['ticker'] == signal['ticker'] else ""
+                        portfolio_text.append(
+                            f"{emoji}{i}. **{pos['ticker']}** - {pos['weight']}% (${pos['value']:,.0f})"
+                        )
+                    
+                    fields.append({
+                        "name": f"📊 {signal['politician']}'s Top Holdings",
+                        "value": "\n".join(portfolio_text),
+                        "inline": False
+                    })
+            except:
+                pass
         
         elif signal['signal_type'] == 'COMMITTEE_ALIGNED':
             title = f"🏛️ Committee-Aligned Trade: {signal['politician']}"
@@ -153,6 +361,28 @@ class DiscordAlerter:
                 }
             ]
         
+        elif signal['signal_type'] == 'OPTIONS_TRADE':
+            title = f"📊 Options Trade: {signal['politician']}"
+            description = f"**Options activity on {signal['ticker']}**"
+            
+            fields = [
+                {
+                    "name": "Ticker",
+                    "value": f"`{signal['ticker']}`",
+                    "inline": True
+                },
+                {
+                    "name": "Amount",
+                    "value": f"${signal['amount']:,}",
+                    "inline": True
+                },
+                {
+                    "name": "Date",
+                    "value": signal['date'],
+                    "inline": True
+                }
+            ]
+        
         else:
             title = f"📌 {signal['signal_type']}: {signal.get('politician', 'Unknown')}"
             description = f"**{signal.get('ticker', 'N/A')}**"
@@ -165,14 +395,14 @@ class DiscordAlerter:
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
             "footer": {
-                "text": "Congressional Trading Scanner"
+                "text": "Congressional Trading Scanner with Portfolio Context"
             }
         }
         
         return embed
     
     def send_signals(self, signals: list, max_signals: int = 10):
-        """Send signals to Discord"""
+        """Send enhanced signals to Discord"""
         
         if not self.enabled:
             print("⚠️  Discord alerts disabled (no webhook URL)")
@@ -182,7 +412,7 @@ class DiscordAlerter:
             print("✅ No signals to send to Discord")
             return
         
-        print(f"\n📤 Sending {len(signals[:max_signals])} signals to Discord...")
+        print(f"\n📤 Sending {len(signals[:max_signals])} enhanced signals to Discord...")
         
         # Send summary message first
         summary_msg = {
@@ -198,10 +428,10 @@ class DiscordAlerter:
         except Exception as e:
             print(f"  ❌ Failed to send summary: {e}")
         
-        # Send individual signal embeds
+        # Send individual enhanced signal embeds
         sent_count = 0
         for signal in signals[:max_signals]:
-            embed = self.create_signal_embed(signal)
+            embed = self.create_enhanced_signal_embed(signal)
             payload = {"embeds": [embed]}
             
             try:
@@ -212,55 +442,25 @@ class DiscordAlerter:
                 else:
                     print(f"  ⚠️  Failed to send signal: {response.status_code}")
                 
-                # Rate limiting - Discord allows 5 messages per 2 seconds
                 import time
-                time.sleep(0.5)
+                time.sleep(1)  # Slower to allow portfolio fetching
                 
             except Exception as e:
                 print(f"  ❌ Error sending signal: {e}")
         
-        print(f"  ✅ Sent {sent_count}/{len(signals[:max_signals])} signals to Discord")
-    
-    def send_performance_report(self, report_text: str):
-        """Send performance tracking report to Discord"""
-        
-        if not self.enabled:
-            return
-        
-        print("\n📤 Sending performance report to Discord...")
-        
-        # Discord has 2000 char limit, so chunk if needed
-        chunks = [report_text[i:i+1900] for i in range(0, len(report_text), 1900)]
-        
-        for i, chunk in enumerate(chunks):
-            msg = {
-                "content": f"```\n{chunk}\n```"
-            }
-            
-            try:
-                response = requests.post(self.webhook_url, json=msg)
-                if response.status_code == 204:
-                    print(f"  ✅ Report chunk {i+1}/{len(chunks)} sent")
-                
-                import time
-                time.sleep(0.5)
-            except Exception as e:
-                print(f"  ❌ Error sending report: {e}")
+        print(f"  ✅ Sent {sent_count}/{len(signals[:max_signals])} enhanced signals to Discord")
 
 def main():
-    """Test Discord alerts"""
+    """Test enhanced Discord alerts"""
     
-    print("🧪 Testing Discord alerts...")
+    print("🧪 Testing enhanced Discord alerts...")
     
-    # Check for webhook URL
     webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
     if not webhook_url:
         print("\n⚠️  No DISCORD_WEBHOOK_URL environment variable set")
-        print("   Set it to test Discord alerts:")
-        print("   export DISCORD_WEBHOOK_URL='your_webhook_url_here'")
         return
     
-    alerter = DiscordAlerter(webhook_url)
+    alerter = EnhancedDiscordAlerter(webhook_url)
     
     # Try to load signals from recent scan
     try:
@@ -270,14 +470,14 @@ def main():
             
             if signals:
                 print(f"\n📊 Found {len(signals)} signals to send")
-                alerter.send_signals(signals)
+                alerter.send_signals(signals, max_signals=5)  # Send top 5 with portfolio context
             else:
                 print("\n⚠️  No signals found in signals.json")
     except FileNotFoundError:
         print("\n⚠️  signals.json not found. Run scanner first.")
     
     print("\n" + "="*60)
-    print("✅ Discord alert test complete!")
+    print("✅ Enhanced Discord alert test complete!")
     print("="*60)
 
 if __name__ == "__main__":
